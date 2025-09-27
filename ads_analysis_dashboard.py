@@ -4,9 +4,37 @@ import plotly.express as px
 import plotly.graph_objects as go
 import os
 import tempfile
+import shutil
+import glob
 from datetime import datetime
 from ads_analysis_complete import analyze_ads_data_complete
 import re
+
+def clear_output_folders():
+    """Clear all output folders from previous runs"""
+    try:
+        output_dir = "output"
+        if os.path.exists(output_dir):
+            # Get all subdirectories in output folder
+            folders_to_remove = glob.glob(os.path.join(output_dir, "*"))
+            folders_removed = 0
+            
+            for folder_path in folders_to_remove:
+                if os.path.isdir(folder_path):
+                    shutil.rmtree(folder_path)
+                    folders_removed += 1
+                elif os.path.isfile(folder_path):
+                    os.remove(folder_path)
+                    folders_removed += 1
+            
+            if folders_removed > 0:
+                st.toast(f"🗑️ Cleared {folders_removed} output folders/files!", icon="✅")
+            else:
+                st.toast("📁 No output folders to clear", icon="ℹ️")
+        else:
+            st.toast("📁 No output directory found", icon="ℹ️")
+    except Exception as e:
+        st.toast(f"❌ Error clearing folders: {str(e)}", icon="🚨")
 
 # Page configuration
 st.set_page_config(
@@ -38,6 +66,19 @@ st.markdown("""
         border-radius: 0.5rem;
         border-left: 4px solid #007bff;
         margin: 0.5rem 0;
+    }
+    
+    /* Dark theme support */
+    .stApp[data-theme="dark"] .main-header {
+        color: #58a6ff;
+    }
+    .stApp[data-theme="dark"] .section-header {
+        color: #f0f6fc;
+        border-bottom-color: #58a6ff;
+    }
+    .stApp[data-theme="dark"] .metric-container {
+        background-color: #21262d;
+        border-left-color: #58a6ff;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -334,6 +375,13 @@ def main():
     with st.sidebar:
         st.header("📁 Upload & Settings")
         
+        # Clear output folders option
+        st.subheader("🎛️ Settings")
+        if st.button("🗑️ Clear Output Folders", help="Remove all previous analysis output folders"):
+            clear_output_folders()
+        
+        st.markdown("---")
+        
         uploaded_file = st.file_uploader(
             "Choose your Excel file",
             type=['xlsx', 'xls'],
@@ -342,9 +390,6 @@ def main():
         
         if uploaded_file is not None:
             st.success(f"✅ File uploaded: {uploaded_file.name}")
-            
-            st.subheader("🎛️ Settings")
-            chart_theme = st.selectbox("Chart Theme", ["plotly_white", "plotly", "plotly_dark"], index=0)
             
     # Main content area
     if uploaded_file is not None:
@@ -379,13 +424,16 @@ def main():
                 # Clean up temp file
                 os.unlink(temp_path)
                 
-                st.success("✅ Analysis completed successfully!")
+                # Show brief success notification
+                if 'last_file_processed' not in st.session_state or st.session_state.last_file_processed != uploaded_file.name:
+                    st.session_state.last_file_processed = uploaded_file.name
+                    st.toast("✅ Analysis completed successfully!", icon="🎉")
                 
                 # Enhance analysis with parsed source information
                 analysis_results = enhance_analysis_with_parsed_sources(analysis_results)
                 
                 # Display analysis with tabs
-                display_tabbed_analysis(analysis_results, combined_df, full_errors_df, chart_theme)
+                display_tabbed_analysis(analysis_results, combined_df, full_errors_df)
                 
             except Exception as e:
                 st.error(f"❌ Error during analysis: {str(e)}")
@@ -411,7 +459,7 @@ def main():
         **📤 Upload your Excel file to begin!**
         """)
 
-def display_tabbed_analysis(analysis_results, combined_df, full_errors_df, theme):
+def display_tabbed_analysis(analysis_results, combined_df, full_errors_df):
     """Display comprehensive overview on homepage with detailed tabs"""
     
     overall = analysis_results['overall']
@@ -449,7 +497,7 @@ def display_tabbed_analysis(analysis_results, combined_df, full_errors_df, theme
             delta=f"{overall['unique_sources']} sources, {overall['unique_adgroups']} ad groups"
         )
     
-        # Create tabs - Homepage with overview + detailed tabs
+            # Create tabs - Homepage with overview + detailed tabs
     tab_overview, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🏠 Complete Overview",
         "🎯 Source Details", 
@@ -461,27 +509,27 @@ def display_tabbed_analysis(analysis_results, combined_df, full_errors_df, theme
     ])
     
     with tab_overview:
-        display_complete_overview(analysis_results, combined_df, full_errors_df, theme)
+        display_complete_overview(analysis_results, combined_df, full_errors_df)
     
     with tab1:
-        display_source_analysis(analysis_results, theme)
+        display_source_analysis(analysis_results)
     
     with tab2:
-        display_campaign_analysis(analysis_results, theme)
+        display_campaign_analysis(analysis_results)
     
     with tab3:
-        display_adgroup_analysis(analysis_results, theme)
+        display_adgroup_analysis(analysis_results)
     
     with tab4:
-        display_error_source_analysis(combined_df, full_errors_df, analysis_results, theme)
+        display_error_source_analysis(combined_df, full_errors_df, analysis_results)
     
     with tab5:
-        display_error_categories(full_errors_df, analysis_results, theme)
+        display_error_categories(full_errors_df, analysis_results)
     
     with tab6:
         display_downloads(analysis_results)
 
-def display_complete_overview(analysis_results, combined_df, full_errors_df, theme):
+def display_complete_overview(analysis_results, combined_df, full_errors_df):
     """Display comprehensive overview with all key analysis on homepage"""
     st.subheader("🏠 Complete Analysis Overview")
     st.info("📊 This page shows all key insights. Use the other tabs for detailed analysis and filtering.")
@@ -549,7 +597,6 @@ def display_complete_overview(analysis_results, combined_df, full_errors_df, the
         fig_source_overview.update_layout(
             title="Source Performance: Success vs Errors",
             barmode='group',
-            template=theme,
             height=450,
             showlegend=True,
             xaxis_tickangle=0
@@ -634,7 +681,6 @@ def display_complete_overview(analysis_results, combined_df, full_errors_df, the
             fig_heatmap = px.imshow(
                 pivot_data,
                 title="Success Rate Heatmap (Source vs Asset Type)",
-                template=theme,
                 color_continuous_scale='RdYlGn',
                 aspect='auto',
                 height=350,
@@ -651,7 +697,6 @@ def display_complete_overview(analysis_results, combined_df, full_errors_df, the
             values='Total Assets',
             names='Asset Type',
             title="Asset Type Distribution",
-            template=theme,
             height=300
         )
         st.plotly_chart(fig_asset_pie, config={'displayModeBar': False})
@@ -700,7 +745,6 @@ def display_complete_overview(analysis_results, combined_df, full_errors_df, the
         
         fig_error_split.update_layout(
             title="Error Source Split",
-            template=theme,
             height=300
         )
         st.plotly_chart(fig_error_split, config={'displayModeBar': False})
@@ -720,7 +764,6 @@ def display_complete_overview(analysis_results, combined_df, full_errors_df, the
                 x='Display_Name',
                 y='Error Count',
                 title="Top 5 Error Sources",
-                template=theme,
                 color='Error Count',
                 color_continuous_scale='Reds',
                 height=300
@@ -814,7 +857,7 @@ def display_complete_overview(analysis_results, combined_df, full_errors_df, the
     st.markdown("---")
     st.info("💡 **Need more details?** Use the tabs above to dive deeper into specific areas: Source Details, Ad Group Details, Error Analysis, etc.")
 
-def display_campaign_analysis(analysis_results, theme):
+def display_campaign_analysis(analysis_results):
     """Display campaign performance analysis with source and asset type breakdown"""
     st.subheader("📊 Campaign Performance Analysis")
     
@@ -931,7 +974,6 @@ def display_campaign_analysis(analysis_results, theme):
                 values=source_dist.values,
                 names=source_dist.index,
                 title="Source Distribution (Filtered Campaigns)",
-                template=theme,
                 height=350
             )
             st.plotly_chart(fig_source_dist, config={'displayModeBar': False})
@@ -944,7 +986,6 @@ def display_campaign_analysis(analysis_results, theme):
                 values=asset_dist.values,
                 names=asset_dist.index,
                 title="Asset Type Distribution (Filtered Campaigns)",
-                template=theme,
                 height=350
             )
             st.plotly_chart(fig_asset_dist, config={'displayModeBar': False})
@@ -1008,7 +1049,7 @@ def display_campaign_analysis(analysis_results, theme):
             height=500
         )
 
-def display_source_analysis(analysis_results, theme):
+def display_source_analysis(analysis_results):
     """Display source performance analysis with enhanced model/prompt filtering"""
     st.subheader("🎯 Source Performance Analysis")
     
@@ -1114,7 +1155,6 @@ def display_source_analysis(analysis_results, theme):
         fig_source.update_layout(
             title="Source Performance: Success vs Errors",
             barmode='stack',
-            template=theme,
             height=450,
             xaxis_title="Source",
             yaxis_title="Number of Assets",
@@ -1130,7 +1170,6 @@ def display_source_analysis(analysis_results, theme):
             values='Total Assets',
             names='Asset Type',
             title="Asset Type Distribution",
-            template=theme,
             height=400
         )
         st.plotly_chart(fig_asset_pie, config={'displayModeBar': False})
@@ -1149,7 +1188,6 @@ def display_source_analysis(analysis_results, theme):
         fig_heatmap = px.imshow(
             pivot_data,
             title="Success Rate Heatmap (Source vs Asset Type)",
-            template=theme,
             color_continuous_scale='RdYlGn',
             aspect='auto',
             height=300
@@ -1167,7 +1205,6 @@ def display_source_analysis(analysis_results, theme):
             y='Total Assets',
             color='Asset Type',
             title="Asset Volume by Source and Asset Type",
-            template=theme,
             barmode='group',
             height=400
         )
@@ -1201,7 +1238,7 @@ def display_source_analysis(analysis_results, theme):
             width='stretch'
         )
 
-def display_adgroup_analysis(analysis_results, theme):
+def display_adgroup_analysis(analysis_results):
     """Display ad group performance analysis with source and asset type context"""
     st.subheader("👥 Ad Group Performance Analysis")
     
@@ -1273,7 +1310,6 @@ def display_adgroup_analysis(analysis_results, theme):
                 color_continuous_scale='RdYlGn',
                 orientation='h',
                 title=f"Top {len(top_adgroups)} Ad Groups (Filtered)",
-                template=theme,
                 height=600,
                 hover_data=['Campaign Name', 'Results Count', 'Errors Count']
             )
@@ -1292,7 +1328,6 @@ def display_adgroup_analysis(analysis_results, theme):
                     values='Total Assets',
                     names='Source',
                     title="Source Distribution (Filtered)",
-                    template=theme,
                     height=300
                 )
                 st.plotly_chart(fig_source_pie, config={'displayModeBar': False})
@@ -1306,7 +1341,6 @@ def display_adgroup_analysis(analysis_results, theme):
                     values='Total Assets',
                     names='Asset Type',
                     title="Asset Type Distribution (Filtered)",
-                    template=theme,
                     height=300
                 )
                 st.plotly_chart(fig_asset_pie, config={'displayModeBar': False})
@@ -1328,7 +1362,6 @@ def display_adgroup_analysis(analysis_results, theme):
                     values=source_dist.values,
                     names=source_dist.index,
                     title="Source Distribution (Filtered Ad Groups)",
-                    template=theme,
                     height=350
                 )
                 st.plotly_chart(fig_source_dist, config={'displayModeBar': False})
@@ -1341,7 +1374,6 @@ def display_adgroup_analysis(analysis_results, theme):
                     values=asset_dist.values,
                     names=asset_dist.index,
                     title="Asset Type Distribution (Filtered Ad Groups)",
-                    template=theme,
                     height=350
                 )
                 st.plotly_chart(fig_asset_dist, config={'displayModeBar': False})
@@ -1491,7 +1523,7 @@ def display_adgroup_analysis(analysis_results, theme):
     else:
         st.warning("No ad groups match the current filters. Try adjusting the filter criteria.")
 
-def display_error_source_analysis(combined_df, full_errors_df, analysis_results, theme):
+def display_error_source_analysis(combined_df, full_errors_df, analysis_results):
     """Display ErrorsFromAdsGeneration analysis with source and asset type breakdown"""
     st.subheader("🔍 Ads Generation Error Vs Ads Review")
     
@@ -1514,9 +1546,7 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                     ads_gen_source,
                     values='Count',
                     names='Source',
-                    title="Ads Generation Errors by Source",
-                    template=theme
-                )
+                    title="Ads Generation Errors by Source")
                 st.plotly_chart(fig_ads_gen, config={'displayModeBar': False})
         else:
             st.info("No ads generation errors found")
@@ -1533,9 +1563,7 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                     ads_review_source,
                     values='Count',
                     names='Source',
-                    title="Ads Review Errors by Source",
-                    template=theme
-                )
+                    title="Ads Review Errors by Source")
                 st.plotly_chart(fig_ads_review, config={'displayModeBar': False})
         else:
             st.info("No ads review errors found")
@@ -1555,7 +1583,6 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                     x='Asset Type',
                     y='Count',
                     title="Ads Generation Errors by Asset Type",
-                    template=theme,
                     color='Count',
                     color_continuous_scale='Reds'
                 )
@@ -1574,7 +1601,6 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                     x='Asset Type',
                     y='Count',
                     title="Ads Review Errors by Asset Type",
-                    template=theme,
                     color='Count',
                     color_continuous_scale='Reds'
                 )
@@ -1603,7 +1629,6 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                 y='Total Errors',
                 color='AssetType',
                 title="Error Distribution: Source vs Asset Type",
-                template=theme,
                 barmode='group'
             )
             st.plotly_chart(fig_error_matrix, config={'displayModeBar': False})
@@ -1654,7 +1679,6 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                     values='Count',
                     names='Category',
                     title="Error Categories Distribution",
-                    template=theme,
                     height=350
                 )
                 st.plotly_chart(fig_error_cat, config={'displayModeBar': False})
@@ -1671,7 +1695,6 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
                 y='Count',
                 color='ErrorFromAdsGeneration',
                 title="Errors by Source and Type",
-                template=theme,
                 height=350,
                 color_discrete_map={'Yes': '#e74c3c', 'No': '#f39c12'}
             )
@@ -1861,7 +1884,7 @@ def display_error_source_analysis(combined_df, full_errors_df, analysis_results,
             top_category = categorized_errors.iloc[0]
             st.info(f"**Top Error Category**: {top_category['Category']} ({top_category['Count']} errors). Focus improvement efforts here first.")
 
-def display_error_categories(full_errors_df, analysis_results, theme):
+def display_error_categories(full_errors_df, analysis_results):
     """Display categorized error analysis with source and asset type breakdown"""
     st.subheader("❌ Error Categories")
     
@@ -1882,7 +1905,6 @@ def display_error_categories(full_errors_df, analysis_results, theme):
                     y='Category',
                     orientation='h',
                     title="Error Categories (Grouped)",
-                    template=theme,
                     color='Count',
                     color_continuous_scale='Reds'
                 )
@@ -1895,9 +1917,7 @@ def display_error_categories(full_errors_df, analysis_results, theme):
                     categorized_errors,
                     values='Count',
                     names='Category',
-                    title="Error Category Distribution",
-                    template=theme
-                )
+                    title="Error Category Distribution")
                 st.plotly_chart(fig_error_pie, config={'displayModeBar': False})
             
             # Source and Asset Type breakdown for errors
@@ -1920,7 +1940,6 @@ def display_error_categories(full_errors_df, analysis_results, theme):
                         x='Display_Name',
                         y='Error Count',
                         title="Errors by Source",
-                        template=theme,
                         color='Error Count',
                         color_continuous_scale='Reds'
                     )
@@ -1944,9 +1963,7 @@ def display_error_categories(full_errors_df, analysis_results, theme):
                         error_by_asset_type,
                         values='Error Count',
                         names='Asset Type',
-                        title="Errors by Asset Type",
-                        template=theme
-                    )
+                        title="Errors by Asset Type")
                     st.plotly_chart(fig_asset_errors, config={'displayModeBar': False})
                     
                     st.dataframe(
