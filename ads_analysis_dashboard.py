@@ -403,59 +403,58 @@ def main():
     # Main content area
     if uploaded_file is not None:
         # Process the uploaded file
-        st.markdown("### 🔄 Processing Analysis")
-        
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            temp_path = tmp_file.name
-        
-        try:
-            # Run analysis with UI logging
-            analysis_results, timestamp = analyze_ads_data_with_ui_logging(temp_path, "output")
+        with st.spinner("🔄 Processing your file..."):
+            # Save uploaded file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                temp_path = tmp_file.name
             
-            if analysis_results is None:
-                st.error("❌ Error processing the file. Please check the file format.")
-                return
-            
-            # Read raw data for additional analysis
-            results_df = pd.read_excel(temp_path, sheet_name='Results')
-            errors_df = pd.read_excel(temp_path, sheet_name='Errors')
-            
-            # Try to read Prompts tab (optional)
-            prompts_config = None
             try:
-                prompts_config = pd.read_excel(temp_path, sheet_name='Prompts')
-            except:
-                pass  # Prompts tab is optional
-            
-            # Combine for ErrorsFromAdsGeneration analysis
-            results_df['DataSource'] = 'Results'
-            errors_df['DataSource'] = 'Errors'
-            common_columns = list(set(results_df.columns) & set(errors_df.columns))
-            combined_df = pd.concat([results_df[common_columns], errors_df[common_columns]], ignore_index=True)
-            
-            # Keep the full errors dataframe for error analysis (includes ReasonForError)
-            full_errors_df = errors_df.copy()
-            
-            # Clean up temp file
-            os.unlink(temp_path)
-            
-            # Show brief success notification
-            if 'last_file_processed' not in st.session_state or st.session_state.last_file_processed != uploaded_file.name:
-                st.session_state.last_file_processed = uploaded_file.name
-                st.toast("✅ Analysis completed successfully!", icon="🎉")
-            
-            # Enhance analysis with parsed source information
-            analysis_results = enhance_analysis_with_parsed_sources(analysis_results)
-            
-            # Display analysis with tabs
-            display_tabbed_analysis(analysis_results, combined_df, full_errors_df)
-            
-        except Exception as e:
-            st.error(f"❌ Error during analysis: {str(e)}")
-            if os.path.exists(temp_path):
+                # Run analysis
+                analysis_results, timestamp = analyze_ads_data_complete(temp_path, "output")
+                
+                if analysis_results is None:
+                    st.error("❌ Error processing the file. Please check the file format.")
+                    return
+                
+                # Read raw data for additional analysis
+                results_df = pd.read_excel(temp_path, sheet_name='Results')
+                errors_df = pd.read_excel(temp_path, sheet_name='Errors')
+                
+                # Try to read Prompts tab (optional)
+                prompts_config = None
+                try:
+                    prompts_config = pd.read_excel(temp_path, sheet_name='Prompts')
+                except:
+                    pass  # Prompts tab is optional
+                
+                # Combine for ErrorsFromAdsGeneration analysis
+                results_df['DataSource'] = 'Results'
+                errors_df['DataSource'] = 'Errors'
+                common_columns = list(set(results_df.columns) & set(errors_df.columns))
+                combined_df = pd.concat([results_df[common_columns], errors_df[common_columns]], ignore_index=True)
+                
+                # Keep the full errors dataframe for error analysis (includes ReasonForError)
+                full_errors_df = errors_df.copy()
+                
+                # Clean up temp file
                 os.unlink(temp_path)
+                
+                # Show brief success notification
+                if 'last_file_processed' not in st.session_state or st.session_state.last_file_processed != uploaded_file.name:
+                    st.session_state.last_file_processed = uploaded_file.name
+                    st.toast("✅ Analysis completed successfully!", icon="🎉")
+                
+                # Enhance analysis with parsed source information
+                analysis_results = enhance_analysis_with_parsed_sources(analysis_results)
+                
+                # Display analysis with tabs
+                display_tabbed_analysis(analysis_results, combined_df, full_errors_df)
+                
+            except Exception as e:
+                st.error(f"❌ Error during analysis: {str(e)}")
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
     else:
         st.markdown("""
         ## 🚀 Welcome to the Ads Analysis Dashboard!
@@ -3155,290 +3154,6 @@ def display_downloads(analysis_results):
                             mime="text/csv",
                             key="default_assets_csv"
                         )
-
-def analyze_ads_data_with_ui_logging(file_path, output_dir="output"):
-    """
-    Modified version of analyze_ads_data_complete that displays logs in Streamlit UI
-    """
-    
-    # Create containers for different types of logs
-    status_container = st.container()
-    progress_container = st.container()
-    log_container = st.container()
-    
-    with status_container:
-        st.info("🚀 Starting complete ads data analysis...")
-    
-    with log_container:
-        log_placeholder = st.empty()
-        logs = []
-        
-        def add_log(message, level="info"):
-            logs.append(f"{datetime.now().strftime('%H:%M:%S')} - {message}")
-            # Keep only last 25 logs to prevent UI overflow
-            if len(logs) > 25:
-                logs.pop(0)
-            log_placeholder.text_area("📋 Processing Logs:", "\n".join(logs), height=250)
-    
-    with progress_container:
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
-    
-    try:
-        add_log(f"📂 Loading data from: {os.path.basename(file_path)}")
-        progress_bar.progress(5)
-        progress_text.text("Step 1/12: Loading Excel file...")
-        
-        # Create output directory if it doesn't exist
-        add_log(f"📁 Creating output directory: {output_dir}")
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Check if file exists first
-        if not os.path.exists(file_path):
-            add_log(f"❌ File not found: {file_path}")
-            st.error(f"❌ File not found: {file_path}")
-            return None
-        
-        add_log(f"📖 File exists, reading tabs...")
-        
-        # Read all tabs
-        try:
-            add_log(f"📖 Reading Results tab...")
-            results_df = pd.read_excel(file_path, sheet_name='Results')
-            add_log(f"✅ Results tab loaded: {len(results_df):,} rows")
-            progress_bar.progress(10)
-        except Exception as e:
-            add_log(f"❌ Error reading Results tab: {e}")
-            st.error(f"❌ Error reading Results tab: {e}")
-            return None
-        
-        try:
-            add_log(f"📖 Reading Errors tab...")
-            errors_df = pd.read_excel(file_path, sheet_name='Errors')
-            add_log(f"✅ Errors tab loaded: {len(errors_df):,} rows")
-            progress_bar.progress(15)
-        except Exception as e:
-            add_log(f"❌ Error reading Errors tab: {e}")
-            st.error(f"❌ Error reading Errors tab: {e}")
-            return None
-        
-        # Try to read Prompts tab (optional)
-        prompts_config = None
-        try:
-            add_log(f"📖 Reading Prompts tab...")
-            prompts_config = pd.read_excel(file_path, sheet_name='Prompts')
-            add_log(f"✅ Prompts tab loaded: {len(prompts_config)} rows")
-        except Exception as prompts_e:
-            add_log(f"⚠️ Prompts tab not found or error reading: {prompts_e}")
-        
-        progress_bar.progress(20)
-        progress_text.text("Step 2/12: Combining dataframes...")
-        add_log(f"🔄 Combining Results and Errors data...")
-        
-        # Combine dataframes for analysis
-        results_df['DataSource'] = 'Results'
-        errors_df['DataSource'] = 'Errors'
-        common_columns = list(set(results_df.columns) & set(errors_df.columns))
-        combined_df = pd.concat([results_df[common_columns], errors_df[common_columns]], ignore_index=True)
-        add_log(f"✅ Combined data: {len(combined_df):,} rows with {len(common_columns)} common columns")
-        
-        progress_bar.progress(25)
-        progress_text.text("Step 3/12: Data cleaning and standardization...")
-        add_log(f"🔧 Cleaning and standardizing data types...")
-        
-        # Import the analysis function components
-        import traceback
-        
-        # Create analysis results dictionary
-        analysis_results = {}
-        
-        # Generate timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        add_log(f"🕐 Generated timestamp: {timestamp}")
-        
-        progress_bar.progress(30)
-        progress_text.text("Step 4/12: Overall summary...")
-        add_log(f"📊 Calculating overall summary...")
-        
-        # Overall Summary
-        overall_stats = {
-            'total_results': len(results_df),
-            'total_errors': len(errors_df),
-            'total_assets': len(combined_df),
-            'success_rate': round((len(results_df) / len(combined_df) * 100), 2),
-            'error_rate': round((len(errors_df) / len(combined_df) * 100), 2),
-            'unique_sources': combined_df['Source'].nunique(),
-            'unique_campaigns': combined_df['CampaignName'].nunique(),
-            'unique_adgroups': combined_df['AdGroups'].nunique(),
-            'unique_asset_types': combined_df['AssetType'].nunique()
-        }
-        analysis_results['overall'] = overall_stats
-        add_log(f"✅ Overall summary: {overall_stats['success_rate']}% success rate")
-        
-        progress_bar.progress(40)
-        progress_text.text("Step 5/12: Source analysis...")
-        add_log(f"📊 Analyzing by source ({overall_stats['unique_sources']} sources)...")
-        
-        # Source Analysis (simplified version)
-        try:
-            source_analysis = combined_df.groupby('Source').agg({
-                'Asset': 'count',
-                'DataSource': lambda x: (x == 'Results').sum()
-            }).reset_index()
-            source_analysis['Errors Count'] = combined_df.groupby('Source')['DataSource'].apply(lambda x: (x == 'Errors').sum()).values
-            source_analysis['Error Rate %'] = (source_analysis['Errors Count'] / source_analysis['Asset'] * 100).round(2)
-            source_analysis = source_analysis.rename(columns={'Asset': 'Total Assets', 'DataSource': 'Results Count'})
-            analysis_results['source_analysis'] = source_analysis.sort_values('Total Assets', ascending=False)
-            add_log(f"✅ Source analysis completed: {len(source_analysis)} sources")
-        except Exception as e:
-            add_log(f"❌ Error in source analysis: {e}")
-            analysis_results['source_analysis'] = pd.DataFrame()
-        
-        progress_bar.progress(50)
-        progress_text.text("Step 6/12: Asset type analysis...")
-        add_log(f"📊 Analyzing by asset type ({overall_stats['unique_asset_types']} types)...")
-        
-        # Asset Type Analysis
-        try:
-            asset_type_analysis = combined_df.groupby('AssetType').agg({
-                'Asset': 'count',
-                'DataSource': lambda x: (x == 'Results').sum()
-            }).reset_index()
-            asset_type_analysis['Errors Count'] = combined_df.groupby('AssetType')['DataSource'].apply(lambda x: (x == 'Errors').sum()).values
-            asset_type_analysis['Error Rate %'] = (asset_type_analysis['Errors Count'] / asset_type_analysis['Asset'] * 100).round(2)
-            asset_type_analysis = asset_type_analysis.rename(columns={'AssetType': 'Asset Type', 'Asset': 'Total Assets', 'DataSource': 'Results Count'})
-            analysis_results['asset_type_analysis'] = asset_type_analysis.sort_values('Total Assets', ascending=False)
-            add_log(f"✅ Asset type analysis completed: {len(asset_type_analysis)} types")
-        except Exception as e:
-            add_log(f"❌ Error in asset type analysis: {e}")
-            analysis_results['asset_type_analysis'] = pd.DataFrame()
-        
-        progress_bar.progress(60)
-        progress_text.text("Step 7/12: Campaign analysis...")
-        add_log(f"📊 Analyzing by campaign ({overall_stats['unique_campaigns']} campaigns)...")
-        
-        # Campaign Analysis
-        try:
-            campaign_analysis = combined_df.groupby('CampaignName').agg({
-                'Asset': 'count',
-                'DataSource': lambda x: (x == 'Results').sum()
-            }).reset_index()
-            campaign_analysis['Errors Count'] = combined_df.groupby('CampaignName')['DataSource'].apply(lambda x: (x == 'Errors').sum()).values
-            campaign_analysis['Error Rate %'] = (campaign_analysis['Errors Count'] / campaign_analysis['Asset'] * 100).round(2)
-            campaign_analysis = campaign_analysis.rename(columns={'CampaignName': 'Campaign Name', 'Asset': 'Total Assets', 'DataSource': 'Results Count'})
-            analysis_results['campaign_analysis'] = campaign_analysis.sort_values('Total Assets', ascending=False)
-            add_log(f"✅ Campaign analysis completed: {len(campaign_analysis)} campaigns")
-        except Exception as e:
-            add_log(f"❌ Error in campaign analysis: {e}")
-            analysis_results['campaign_analysis'] = pd.DataFrame()
-        
-        progress_bar.progress(70)
-        progress_text.text("Step 8/12: Ad group analysis...")
-        add_log(f"📊 Analyzing by ad group ({overall_stats['unique_adgroups']} ad groups)...")
-        
-        # Ad Group Analysis
-        try:
-            adgroup_analysis = combined_df.groupby(['AdGroups', 'CampaignName']).agg({
-                'Asset': 'count',
-                'DataSource': lambda x: (x == 'Results').sum()
-            }).reset_index()
-            adgroup_analysis['Errors Count'] = combined_df.groupby(['AdGroups', 'CampaignName'])['DataSource'].apply(lambda x: (x == 'Errors').sum()).values
-            adgroup_analysis['Success Rate %'] = (adgroup_analysis['DataSource'] / adgroup_analysis['Asset'] * 100).round(2)
-            adgroup_analysis = adgroup_analysis.rename(columns={'AdGroups': 'Ad Group', 'CampaignName': 'Campaign Name', 'Asset': 'Total Assets', 'DataSource': 'Results Count'})
-            analysis_results['adgroup_analysis'] = adgroup_analysis.sort_values('Total Assets', ascending=False)
-            add_log(f"✅ Ad group analysis completed: {len(adgroup_analysis)} ad groups")
-        except Exception as e:
-            add_log(f"❌ Error in ad group analysis: {e}")
-            analysis_results['adgroup_analysis'] = pd.DataFrame()
-        
-        progress_bar.progress(80)
-        progress_text.text("Step 9/12: Error analysis...")
-        
-        # Error Analysis
-        if len(errors_df) > 0:
-            add_log(f"📊 Analyzing errors ({len(errors_df):,} error records)...")
-            error_analysis = {}
-            
-            try:
-                if 'ReasonForError' in errors_df.columns:
-                    error_reasons = errors_df['ReasonForError'].value_counts().reset_index()
-                    error_reasons.columns = ['Error Reason', 'Count']
-                    error_reasons['Percentage'] = (error_reasons['Count'] / len(errors_df) * 100).round(2)
-                    error_analysis['error_reasons'] = error_reasons
-                    add_log(f"✅ Found {len(error_reasons)} unique error reasons")
-                
-                error_by_source = errors_df['Source'].value_counts().reset_index()
-                error_by_source.columns = ['Source', 'Error Count']
-                error_by_source['Percentage'] = (error_by_source['Error Count'] / len(errors_df) * 100).round(2)
-                error_analysis['error_by_source'] = error_by_source
-                
-                analysis_results['error_analysis'] = error_analysis
-                add_log(f"✅ Error analysis completed")
-            except Exception as e:
-                add_log(f"❌ Error in error analysis: {e}")
-        else:
-            add_log(f"⚠️ No errors to analyze")
-        
-        progress_bar.progress(90)
-        progress_text.text("Step 10/12: Prompts analysis...")
-        
-        # Prompts Analysis (if available)
-        if prompts_config is not None:
-            add_log(f"📊 Analyzing prompts performance...")
-            try:
-                # Simplified prompts analysis for UI
-                analysis_results['prompts_analysis'] = {
-                    'prompt_configs': {},
-                    'prompt_performance': pd.DataFrame(),
-                    'adgroup_prompt_analysis': pd.DataFrame(),
-                    'campaign_prompt_analysis': pd.DataFrame(),
-                    'default_assets_analysis': pd.DataFrame()
-                }
-                add_log(f"✅ Prompts analysis completed")
-            except Exception as e:
-                add_log(f"❌ Error in prompts analysis: {e}")
-        else:
-            add_log(f"⚠️ No prompts configuration found")
-        
-        progress_bar.progress(95)
-        progress_text.text("Step 11/12: Saving results...")
-        add_log(f"💾 Saving analysis results...")
-        
-        # Create output directory
-        sections_dir = os.path.join(output_dir, f'complete_analysis_{timestamp}')
-        os.makedirs(sections_dir, exist_ok=True)
-        add_log(f"📁 Created analysis directory: {sections_dir}")
-        
-        # Save key analysis files
-        try:
-            if 'source_analysis' in analysis_results and len(analysis_results['source_analysis']) > 0:
-                analysis_results['source_analysis'].to_csv(os.path.join(sections_dir, 'source_analysis_complete.csv'), index=False)
-            if 'campaign_analysis' in analysis_results and len(analysis_results['campaign_analysis']) > 0:
-                analysis_results['campaign_analysis'].to_csv(os.path.join(sections_dir, 'campaign_analysis_complete.csv'), index=False)
-            if 'adgroup_analysis' in analysis_results and len(analysis_results['adgroup_analysis']) > 0:
-                analysis_results['adgroup_analysis'].to_csv(os.path.join(sections_dir, 'adgroup_analysis_complete.csv'), index=False)
-            add_log(f"✅ Key analysis files saved")
-        except Exception as e:
-            add_log(f"⚠️ Some files could not be saved: {e}")
-        
-        progress_bar.progress(100)
-        progress_text.text("Step 12/12: Complete! ✅")
-        
-        add_log(f"🎉 Analysis completed successfully!")
-        add_log(f"📊 Results saved with timestamp: {timestamp}")
-        add_log(f"📈 Success Rate: {overall_stats['success_rate']}% | Error Rate: {overall_stats['error_rate']}%")
-        
-        # Show success message
-        with status_container:
-            st.success("🎉 Analysis completed successfully!")
-        
-        return analysis_results, timestamp
-        
-    except Exception as e:
-        add_log(f"❌ Unexpected error during analysis: {e}")
-        add_log(f"❌ Traceback: {str(e)}")
-        st.error(f"❌ Unexpected error during analysis: {e}")
-        return None
 
 if __name__ == "__main__":
     main() 
