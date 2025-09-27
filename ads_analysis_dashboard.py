@@ -2809,21 +2809,13 @@ def display_prompts_analysis(analysis_results):
                         
                         st.markdown("**Asset Type Summary:**")
                         
-                        # Style asset summary with red highlighting for negative gaps and remove negative signs
+                        # Style asset summary with red highlighting for negative gaps
                         def style_negative_values_under_gen(val):
                             if isinstance(val, (int, float)) and val < 0:
                                 return 'color: red'
                             return ''
                         
-                        def format_negative_values_under_gen(val):
-                            if isinstance(val, (int, float)) and val < 0:
-                                return str(abs(int(val)))
-                            return str(int(val)) if isinstance(val, (int, float)) else val
-                        
-                        asset_summary_display = asset_summary.copy()
-                        asset_summary_display['Generation_Gap'] = asset_summary_display['Generation_Gap'].apply(format_negative_values_under_gen)
-                        
-                        asset_summary_styled = asset_summary_display.style.applymap(
+                        asset_summary_styled = asset_summary.style.applymap(
                             style_negative_values_under_gen, subset=['Generation_Gap']
                         )
                         
@@ -2966,21 +2958,13 @@ def display_prompts_analysis(analysis_results):
                         
                         st.markdown("**Asset Type Summary:**")
                         
-                        # Style asset summary with red highlighting for negative gaps and remove negative signs
+                        # Style asset summary with red highlighting for negative gaps
                         def style_negative_values_over_gen(val):
                             if isinstance(val, (int, float)) and val < 0:
                                 return 'color: red'
                             return ''
                         
-                        def format_negative_values_over_gen(val):
-                            if isinstance(val, (int, float)) and val < 0:
-                                return str(abs(int(val)))
-                            return str(int(val)) if isinstance(val, (int, float)) else val
-                        
-                        asset_summary_display_over = asset_summary.copy()
-                        asset_summary_display_over['Results_Generation_Gap'] = asset_summary_display_over['Results_Generation_Gap'].apply(format_negative_values_over_gen)
-                        
-                        asset_summary_styled_over = asset_summary_display_over.style.applymap(
+                        asset_summary_styled_over = asset_summary.style.applymap(
                             style_negative_values_over_gen, subset=['Results_Generation_Gap']
                         )
                         
@@ -3122,21 +3106,13 @@ def display_prompts_analysis(analysis_results):
                         
                         st.markdown("**Asset Type Summary:**")
                         
-                        # Style asset summary with red highlighting for negative gaps and remove negative signs
+                        # Style asset summary with red highlighting for negative gaps
                         def style_negative_values_under_sel(val):
                             if isinstance(val, (int, float)) and val < 0:
                                 return 'color: red'
                             return ''
                         
-                        def format_negative_values_under_sel(val):
-                            if isinstance(val, (int, float)) and val < 0:
-                                return str(abs(int(val)))
-                            return str(int(val)) if isinstance(val, (int, float)) else val
-                        
-                        asset_summary_display_sel = asset_summary.copy()
-                        asset_summary_display_sel['Selection_Gap'] = asset_summary_display_sel['Selection_Gap'].apply(format_negative_values_under_sel)
-                        
-                        asset_summary_styled_sel = asset_summary_display_sel.style.applymap(
+                        asset_summary_styled_sel = asset_summary.style.applymap(
                             style_negative_values_under_sel, subset=['Selection_Gap']
                         )
                         
