@@ -2700,28 +2700,158 @@ def display_prompts_analysis(analysis_results):
         under_generated = filtered_adgroup_analysis[filtered_adgroup_analysis['Generation_Gap'] < 0]
         under_selected = filtered_adgroup_analysis[filtered_adgroup_analysis['Selection_Gap'] < 0]
         
-        # Create expandable sections for different performance categories
+        # Create hierarchical expandable sections for different performance categories
         # Row 1: Under-Generated Assets (full width)
         if len(under_generated) > 0:
-            st.warning(f"⚠️ {len(under_generated)} records under-generated assets")
+            # Calculate unique ad group counts and asset type breakdown
+            unique_adgroups = under_generated.groupby(['Campaign Name', 'Ad Group']).size().shape[0]
+            headlines_count = len(under_generated[under_generated['Asset Type'].str.contains('headline', case=False, na=False)])
+            descriptions_count = len(under_generated[under_generated['Asset Type'].str.contains('description', case=False, na=False)])
+            
+            st.warning(f"⚠️ {len(under_generated)} records under-generated assets across {unique_adgroups} unique campaign-adgroup combinations ({headlines_count} headlines, {descriptions_count} descriptions)")
             with st.expander("View Under-Generated Assets"):
-                # Sort under-generated data with same logic
-                under_gen_display = under_generated.copy()
-                under_gen_display['Prompt'] = under_gen_display['Prompt Number'].apply(lambda x: f'Prompt #{x}')
-                under_gen_display['Asset_Type_Order'] = under_gen_display['Asset Type'].apply(lambda x: 0 if 'Headline' in str(x) else 1)
-                under_gen_sorted = under_gen_display.sort_values(['Campaign Name', 'Ad Group', 'Asset_Type_Order', 'Prompt Number'])
+                # Create hierarchical summary by Campaign + Ad Group
+                under_gen_summary = under_generated.groupby(['Campaign Name', 'Ad Group']).agg({
+                    'Total Generated': 'sum',
+                    'Results Assets': 'sum', 
+                    'Errors Count': 'sum',
+                    'Generation_Gap': 'sum',  # Sum the gaps
+                    'Max_To_Generate': 'sum'  # Sum max generation across all prompts
+                }).reset_index()
                 
-                # Format generation gap for display
-                under_gen_sorted['Generation Gap Display'] = under_gen_sorted['Generation_Gap'].apply(format_generation_gap)
+                under_gen_summary['Records Count'] = under_generated.groupby(['Campaign Name', 'Ad Group']).size().values
+                under_gen_summary['Success Rate %'] = (under_gen_summary['Results Assets'] / under_gen_summary['Total Generated'] * 100).round(2)
                 
-                # Style the dataframe with red highlighting for negative gaps
-                under_gen_styled = under_gen_sorted[['Campaign Name', 'Ad Group', 'Prompt', 'Asset Type', 
-                                'Max_To_Generate', 'Total Generated', 'Results Assets', 'Errors Count', 
-                                'Success Rate %', 'Generation Gap Display']].style.applymap(
-                    color_gap, subset=['Generation Gap Display']
+                # Calculate Generation Gap similar to Combined Ad Group Analysis
+                under_gen_summary['Generation Gap'] = under_gen_summary['Max_To_Generate'] - under_gen_summary['Total Generated']
+                
+                st.markdown("**📋 Campaign & Ad Group Summary**")
+                
+                # Add pagination for summary table
+                summary_page_size = st.selectbox("Rows per page (Summary)", [10, 25, 50], index=1, key="under_gen_summary_page_size")
+                total_summary_rows = len(under_gen_summary)
+                total_summary_pages = (total_summary_rows - 1) // summary_page_size + 1 if total_summary_rows > 0 else 1
+                
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    summary_current_page = st.number_input(
+                        f"Page (1-{total_summary_pages})",
+                        min_value=1,
+                        max_value=total_summary_pages,
+                        value=1,
+                        key="under_gen_summary_current_page"
+                    )
+                with col2:
+                    st.info(f"Showing {total_summary_rows:,} campaign-adgroup combinations across {total_summary_pages} pages")
+                
+                # Paginate summary data
+                summary_start_idx = (summary_current_page - 1) * summary_page_size
+                summary_end_idx = min(summary_start_idx + summary_page_size, total_summary_rows)
+                paginated_summary = under_gen_summary.iloc[summary_start_idx:summary_end_idx]
+                
+                # Style the summary table with red highlighting for Generation Gap
+                def style_summary_generation_gap(val):
+                    if isinstance(val, (int, float)) and val != 0:
+                        return 'color: red'
+                    return ''
+                
+                summary_styled = paginated_summary[['Campaign Name', 'Ad Group', 'Records Count', 'Total Generated', 
+                                                  'Results Assets', 'Errors Count', 'Success Rate %', 'Generation Gap']].style.applymap(
+                    style_summary_generation_gap, subset=['Generation Gap']
                 )
                 
-                st.dataframe(under_gen_styled, width='stretch', height=400)
+                st.dataframe(summary_styled, width='stretch', height=300)
+                
+                # Detailed breakdown by asset type and prompt
+                st.markdown("**🔍 Detailed Breakdown by Asset Type & Prompt**")
+                
+                # Add filters for detailed breakdown
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    campaigns_list = ['All'] + sorted(under_generated['Campaign Name'].unique().tolist())
+                    selected_detail_campaign = st.selectbox("Filter by Campaign", campaigns_list, key="under_gen_detail_campaign")
+                
+                with col2:
+                    if selected_detail_campaign != 'All':
+                        adgroups_list = ['All'] + sorted(under_generated[under_generated['Campaign Name'] == selected_detail_campaign]['Ad Group'].unique().tolist())
+                    else:
+                        adgroups_list = ['All'] + sorted(under_generated['Ad Group'].unique().tolist())
+                    selected_detail_adgroup = st.selectbox("Filter by Ad Group", adgroups_list, key="under_gen_detail_adgroup")
+                
+                with col3:
+                    max_sections = st.selectbox("Max sections to show", [5, 10, 20, 50], index=1, key="under_gen_max_sections")
+                
+                # Apply filters
+                filtered_under_gen = under_generated.copy()
+                if selected_detail_campaign != 'All':
+                    filtered_under_gen = filtered_under_gen[filtered_under_gen['Campaign Name'] == selected_detail_campaign]
+                if selected_detail_adgroup != 'All':
+                    filtered_under_gen = filtered_under_gen[filtered_under_gen['Ad Group'] == selected_detail_adgroup]
+                
+                # Limit the number of sections to prevent UI overload
+                grouped_data = list(filtered_under_gen.groupby(['Campaign Name', 'Ad Group']))
+                limited_groups = grouped_data[:max_sections]
+                
+                if len(grouped_data) > max_sections:
+                    st.warning(f"⚠️ Showing {max_sections} of {len(grouped_data)} campaign-adgroup combinations. Use filters to see specific ones.")
+                
+                # Group by Campaign + Ad Group + Asset Type for second level
+                for (campaign, adgroup), group_data in limited_groups:
+                    with st.expander(f"📁 {campaign} → {adgroup} ({len(group_data)} records)"):
+                        # Asset type summary
+                        asset_summary = group_data.groupby('Asset Type').agg({
+                            'Total Generated': 'sum',
+                            'Results Assets': 'sum',
+                            'Errors Count': 'sum',
+                            'Generation_Gap': 'sum'
+                        }).reset_index()
+                        asset_summary['Records Count'] = group_data.groupby('Asset Type').size().values
+                        
+                        st.markdown("**Asset Type Summary:**")
+                        
+                        # Style asset summary with red highlighting for negative gaps and remove negative signs
+                        def style_negative_values_under_gen(val):
+                            if isinstance(val, (int, float)) and val < 0:
+                                return 'color: red'
+                            return ''
+                        
+                        def format_negative_values_under_gen(val):
+                            if isinstance(val, (int, float)) and val < 0:
+                                return str(abs(int(val)))
+                            return str(int(val)) if isinstance(val, (int, float)) else val
+                        
+                        asset_summary_display = asset_summary.copy()
+                        asset_summary_display['Generation_Gap'] = asset_summary_display['Generation_Gap'].apply(format_negative_values_under_gen)
+                        
+                        asset_summary_styled = asset_summary_display.style.applymap(
+                            style_negative_values_under_gen, subset=['Generation_Gap']
+                        )
+                        
+                        st.dataframe(asset_summary_styled, width='stretch')
+                        
+                        # Individual prompt details
+                        st.markdown("**Individual Prompt Details:**")
+                        prompt_display = group_data.copy()
+                        prompt_display['Prompt'] = prompt_display['Prompt Number'].apply(lambda x: f'Prompt #{x}')
+                        prompt_display['Generation Gap Display'] = prompt_display['Generation_Gap'].apply(format_generation_gap)
+                        
+                        # Style individual prompt details with red highlighting
+                        def style_prompt_gaps(val):
+                            if isinstance(val, str) and val != '0':
+                                return 'color: red'
+                            return ''
+                        
+                        # Sort by Asset Type (Headlines first), then Prompt Number
+                        prompt_display['Asset_Type_Order'] = prompt_display['Asset Type'].apply(lambda x: 0 if 'Headline' in str(x) else 1)
+                        prompt_sorted = prompt_display.sort_values(['Asset_Type_Order', 'Prompt Number'])
+                        
+                        # Style the prompt details dataframe
+                        prompt_styled = prompt_sorted[['Prompt', 'Asset Type', 'Max_To_Generate', 'Total Generated', 
+                                                      'Results Assets', 'Errors Count', 'Success Rate %', 'Generation Gap Display']].style.applymap(
+                            style_prompt_gaps, subset=['Generation Gap Display']
+                        )
+                        
+                        st.dataframe(prompt_styled, width='stretch')
         else:
             st.success("✅ All records met generation targets!")
         
@@ -2730,56 +2860,311 @@ def display_prompts_analysis(analysis_results):
         filtered_adgroup_analysis['Results_Generation_Gap'] = filtered_adgroup_analysis['Results Assets'] - filtered_adgroup_analysis['Max_To_Generate']
         over_generated = filtered_adgroup_analysis[filtered_adgroup_analysis['Results_Generation_Gap'] > 0]
         if len(over_generated) > 0:
-            st.info(f"ℹ️ {len(over_generated)} records over-generated assets")
+            # Calculate unique ad group counts and asset type breakdown for over-generated
+            over_unique_adgroups = over_generated.groupby(['Campaign Name', 'Ad Group']).size().shape[0]
+            over_headlines_count = len(over_generated[over_generated['Asset Type'].str.contains('headline', case=False, na=False)])
+            over_descriptions_count = len(over_generated[over_generated['Asset Type'].str.contains('description', case=False, na=False)])
+            
+            st.info(f"ℹ️ {len(over_generated)} records over-generated assets across {over_unique_adgroups} unique campaign-adgroup combinations ({over_headlines_count} headlines, {over_descriptions_count} descriptions)")
             with st.expander("View Over-Generated Assets"):
-                # Sort over-generated data with same logic
-                over_gen_display = over_generated.copy()
-                over_gen_display['Prompt'] = over_gen_display['Prompt Number'].apply(lambda x: f'Prompt #{x}')
-                over_gen_display['Asset_Type_Order'] = over_gen_display['Asset Type'].apply(lambda x: 0 if 'Headline' in str(x) else 1)
-                over_gen_sorted = over_gen_display.sort_values(['Campaign Name', 'Ad Group', 'Asset_Type_Order', 'Prompt Number'])
+                # Create hierarchical summary by Campaign + Ad Group
+                over_gen_summary = over_generated.groupby(['Campaign Name', 'Ad Group']).agg({
+                    'Total Generated': 'sum',
+                    'Results Assets': 'sum',
+                    'Errors Count': 'sum',
+                    'Results_Generation_Gap': 'sum',  # Sum the results gaps
+                    'Max_To_Generate': 'sum'  # Sum max generation across all prompts
+                }).reset_index()
                 
-                # Format Results-based generation gap for display
-                over_gen_sorted['Results Gap'] = over_gen_sorted['Results_Generation_Gap'].apply(format_generation_gap)
+                over_gen_summary['Records Count'] = over_generated.groupby(['Campaign Name', 'Ad Group']).size().values
+                over_gen_summary['Success Rate %'] = (over_gen_summary['Results Assets'] / over_gen_summary['Total Generated'] * 100).round(2)
                 
-                # Style the dataframe with green highlighting for positive gaps (over-generated results)
-                # Rename columns for better clarity
-                display_columns = over_gen_sorted[['Campaign Name', 'Ad Group', 'Prompt', 'Asset Type', 
-                               'Max_To_Generate', 'Total Generated', 'Results Assets', 'Errors Count', 
-                               'Success Rate %', 'Results Gap']].copy()
-                display_columns = display_columns.rename(columns={'Max_To_Generate': 'Max to Generate'})
+                # Calculate Generation Gap (Results Assets - Max to Generate)
+                over_gen_summary['Generation Gap'] = over_gen_summary['Results Assets'] - over_gen_summary['Max_To_Generate']
                 
-                over_gen_styled = display_columns.style.applymap(
-                    lambda x: 'color: green' if isinstance(x, str) and x != '0' else '', 
-                    subset=['Results Gap']
+                st.markdown("**📋 Campaign & Ad Group Summary**")
+                
+                # Add pagination for over-generated summary table
+                over_summary_page_size = st.selectbox("Rows per page (Summary)", [10, 25, 50], index=1, key="over_gen_summary_page_size")
+                total_over_summary_rows = len(over_gen_summary)
+                total_over_summary_pages = (total_over_summary_rows - 1) // over_summary_page_size + 1 if total_over_summary_rows > 0 else 1
+                
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    over_summary_current_page = st.number_input(
+                        f"Page (1-{total_over_summary_pages})",
+                        min_value=1,
+                        max_value=total_over_summary_pages,
+                        value=1,
+                        key="over_gen_summary_current_page"
+                    )
+                with col2:
+                    st.info(f"Showing {total_over_summary_rows:,} campaign-adgroup combinations across {total_over_summary_pages} pages")
+                
+                # Paginate over-generated summary data
+                over_summary_start_idx = (over_summary_current_page - 1) * over_summary_page_size
+                over_summary_end_idx = min(over_summary_start_idx + over_summary_page_size, total_over_summary_rows)
+                paginated_over_summary = over_gen_summary.iloc[over_summary_start_idx:over_summary_end_idx]
+                
+                # Style the over-generated summary table with red highlighting for Generation Gap
+                def style_over_summary_generation_gap(val):
+                    if isinstance(val, (int, float)) and val != 0:
+                        return 'color: red'
+                    return ''
+                
+                over_summary_styled = paginated_over_summary[['Campaign Name', 'Ad Group', 'Records Count', 'Total Generated', 
+                                                            'Results Assets', 'Errors Count', 'Success Rate %', 'Generation Gap']].style.applymap(
+                    style_over_summary_generation_gap, subset=['Generation Gap']
                 )
                 
-                st.dataframe(over_gen_styled, width='stretch', height=400)
+                st.dataframe(over_summary_styled, width='stretch', height=300)
+                
+                # Detailed breakdown by asset type and prompt
+                st.markdown("**🔍 Detailed Breakdown by Asset Type & Prompt**")
+                
+                # Add filters for over-generated detailed breakdown
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    over_campaigns_list = ['All'] + sorted(over_generated['Campaign Name'].unique().tolist())
+                    selected_over_detail_campaign = st.selectbox("Filter by Campaign", over_campaigns_list, key="over_gen_detail_campaign")
+                
+                with col2:
+                    if selected_over_detail_campaign != 'All':
+                        over_adgroups_list = ['All'] + sorted(over_generated[over_generated['Campaign Name'] == selected_over_detail_campaign]['Ad Group'].unique().tolist())
+                    else:
+                        over_adgroups_list = ['All'] + sorted(over_generated['Ad Group'].unique().tolist())
+                    selected_over_detail_adgroup = st.selectbox("Filter by Ad Group", over_adgroups_list, key="over_gen_detail_adgroup")
+                
+                with col3:
+                    over_max_sections = st.selectbox("Max sections to show", [5, 10, 20, 50], index=1, key="over_gen_max_sections")
+                
+                # Apply filters for over-generated
+                filtered_over_gen = over_generated.copy()
+                if selected_over_detail_campaign != 'All':
+                    filtered_over_gen = filtered_over_gen[filtered_over_gen['Campaign Name'] == selected_over_detail_campaign]
+                if selected_over_detail_adgroup != 'All':
+                    filtered_over_gen = filtered_over_gen[filtered_over_gen['Ad Group'] == selected_over_detail_adgroup]
+                
+                # Limit the number of sections to prevent UI overload
+                over_grouped_data = list(filtered_over_gen.groupby(['Campaign Name', 'Ad Group']))
+                over_limited_groups = over_grouped_data[:over_max_sections]
+                
+                if len(over_grouped_data) > over_max_sections:
+                    st.warning(f"⚠️ Showing {over_max_sections} of {len(over_grouped_data)} campaign-adgroup combinations. Use filters to see specific ones.")
+                
+                # Group by Campaign + Ad Group for second level
+                for (campaign, adgroup), group_data in over_limited_groups:
+                    with st.expander(f"📁 {campaign} → {adgroup} ({len(group_data)} records)"):
+                        # Asset type summary
+                        asset_summary = group_data.groupby('Asset Type').agg({
+                            'Total Generated': 'sum',
+                            'Results Assets': 'sum',
+                            'Errors Count': 'sum',
+                            'Results_Generation_Gap': 'sum'
+                        }).reset_index()
+                        asset_summary['Records Count'] = group_data.groupby('Asset Type').size().values
+                        
+                        st.markdown("**Asset Type Summary:**")
+                        
+                        # Style asset summary with red highlighting for negative gaps and remove negative signs
+                        def style_negative_values_over_gen(val):
+                            if isinstance(val, (int, float)) and val < 0:
+                                return 'color: red'
+                            return ''
+                        
+                        def format_negative_values_over_gen(val):
+                            if isinstance(val, (int, float)) and val < 0:
+                                return str(abs(int(val)))
+                            return str(int(val)) if isinstance(val, (int, float)) else val
+                        
+                        asset_summary_display_over = asset_summary.copy()
+                        asset_summary_display_over['Results_Generation_Gap'] = asset_summary_display_over['Results_Generation_Gap'].apply(format_negative_values_over_gen)
+                        
+                        asset_summary_styled_over = asset_summary_display_over.style.applymap(
+                            style_negative_values_over_gen, subset=['Results_Generation_Gap']
+                        )
+                        
+                        st.dataframe(asset_summary_styled_over, width='stretch')
+                        
+                        # Individual prompt details
+                        st.markdown("**Individual Prompt Details:**")
+                        prompt_display = group_data.copy()
+                        prompt_display['Prompt'] = prompt_display['Prompt Number'].apply(lambda x: f'Prompt #{x}')
+                        prompt_display['Results Gap'] = prompt_display['Results_Generation_Gap'].apply(format_generation_gap)
+                        
+                        # Style individual prompt details with red highlighting
+                        def style_prompt_gaps_over(val):
+                            if isinstance(val, str) and val != '0':
+                                return 'color: red'
+                            return ''
+                        
+                        # Sort by Asset Type (Headlines first), then Prompt Number
+                        prompt_display['Asset_Type_Order'] = prompt_display['Asset Type'].apply(lambda x: 0 if 'Headline' in str(x) else 1)
+                        prompt_sorted = prompt_display.sort_values(['Asset_Type_Order', 'Prompt Number'])
+                        
+                        # Style the prompt details dataframe
+                        prompt_styled_over = prompt_sorted[['Prompt', 'Asset Type', 'Max_To_Generate', 'Total Generated', 
+                                                          'Results Assets', 'Errors Count', 'Success Rate %', 'Results Gap']].style.applymap(
+                            style_prompt_gaps_over, subset=['Results Gap']
+                        )
+                        
+                        st.dataframe(prompt_styled_over, width='stretch')
         else:
             st.success("✅ No over-generated assets found!")
         
-        # Row 3: Selection Analysis
-        st.markdown("---")
-        
+        # Row 3: Under-Selected Assets (remove line break)
         if len(under_selected) > 0:
-            st.warning(f"⚠️ {len(under_selected)} records insufficient for selection")
+            # Calculate unique ad group counts and asset type breakdown for under-selected
+            under_sel_unique_adgroups = under_selected.groupby(['Campaign Name', 'Ad Group']).size().shape[0]
+            under_sel_headlines_count = len(under_selected[under_selected['Asset Type'].str.contains('headline', case=False, na=False)])
+            under_sel_descriptions_count = len(under_selected[under_selected['Asset Type'].str.contains('description', case=False, na=False)])
+            
+            st.warning(f"⚠️ {len(under_selected)} records insufficient for selection across {under_sel_unique_adgroups} unique campaign-adgroup combinations ({under_sel_headlines_count} headlines, {under_sel_descriptions_count} descriptions)")
             with st.expander("View Under-Selected Assets"):
-                # Sort under-selected data with same logic
-                under_sel_display = under_selected.copy()
-                under_sel_display['Prompt'] = under_sel_display['Prompt Number'].apply(lambda x: f'Prompt #{x}')
-                under_sel_display['Asset_Type_Order'] = under_sel_display['Asset Type'].apply(lambda x: 0 if 'Headline' in str(x) else 1)
-                under_sel_sorted = under_sel_display.sort_values(['Campaign Name', 'Ad Group', 'Asset_Type_Order', 'Prompt Number'])
+                # Create hierarchical summary by Campaign + Ad Group
+                under_sel_summary = under_selected.groupby(['Campaign Name', 'Ad Group']).agg({
+                    'Total Generated': 'sum',
+                    'Results Assets': 'sum',
+                    'Errors Count': 'sum',
+                    'Target_Assets': 'sum',
+                    'Selection_Gap': 'sum'  # Sum the selection gaps
+                }).reset_index()
                 
-                # Format selection gap for display
-                under_sel_sorted['Selection Gap Display'] = under_sel_sorted['Selection_Gap'].apply(format_selection_gap)
+                under_sel_summary['Records Count'] = under_selected.groupby(['Campaign Name', 'Ad Group']).size().values
+                under_sel_summary['Success Rate %'] = (under_sel_summary['Results Assets'] / under_sel_summary['Total Generated'] * 100).round(2)
                 
-                # Style the dataframe with red highlighting for selection gaps
-                under_sel_styled = under_sel_sorted[['Campaign Name', 'Ad Group', 'Prompt', 'Asset Type', 
-                                'Total Generated', 'Results Assets', 'Target_Assets', 'Errors Count', 
-                                'Success Rate %', 'Selection Gap Display']].style.applymap(
-                    color_selection_gap, subset=['Selection Gap Display']
+                # Calculate Selection Gap (Target Assets - Results Assets, show as positive if shortage)
+                under_sel_summary['Selection Gap'] = under_sel_summary['Target_Assets'] - under_sel_summary['Results Assets']
+                under_sel_summary['Selection Gap'] = under_sel_summary['Selection Gap'].apply(lambda x: max(0, x))  # Show only positive shortages
+                
+                st.markdown("**📋 Campaign & Ad Group Summary**")
+                
+                # Add pagination for under-selected summary table
+                under_sel_summary_page_size = st.selectbox("Rows per page (Summary)", [10, 25, 50], index=1, key="under_sel_summary_page_size")
+                total_under_sel_summary_rows = len(under_sel_summary)
+                total_under_sel_summary_pages = (total_under_sel_summary_rows - 1) // under_sel_summary_page_size + 1 if total_under_sel_summary_rows > 0 else 1
+                
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    under_sel_summary_current_page = st.number_input(
+                        f"Page (1-{total_under_sel_summary_pages})",
+                        min_value=1,
+                        max_value=total_under_sel_summary_pages,
+                        value=1,
+                        key="under_sel_summary_current_page"
+                    )
+                with col2:
+                    st.info(f"Showing {total_under_sel_summary_rows:,} campaign-adgroup combinations across {total_under_sel_summary_pages} pages")
+                
+                # Paginate under-selected summary data
+                under_sel_summary_start_idx = (under_sel_summary_current_page - 1) * under_sel_summary_page_size
+                under_sel_summary_end_idx = min(under_sel_summary_start_idx + under_sel_summary_page_size, total_under_sel_summary_rows)
+                paginated_under_sel_summary = under_sel_summary.iloc[under_sel_summary_start_idx:under_sel_summary_end_idx]
+                
+                # Style the under-selected summary table with red highlighting for Selection Gap
+                def style_under_sel_summary_selection_gap(val):
+                    if isinstance(val, (int, float)) and val != 0:
+                        return 'color: red'
+                    return ''
+                
+                under_sel_summary_styled = paginated_under_sel_summary[['Campaign Name', 'Ad Group', 'Records Count', 'Total Generated', 
+                                                                      'Results Assets', 'Target_Assets', 'Errors Count', 'Success Rate %', 'Selection Gap']].style.applymap(
+                    style_under_sel_summary_selection_gap, subset=['Selection Gap']
                 )
                 
-                st.dataframe(under_sel_styled, width='stretch', height=400)
+                st.dataframe(under_sel_summary_styled, width='stretch', height=300)
+                
+                # Detailed breakdown by asset type and prompt
+                st.markdown("**🔍 Detailed Breakdown by Asset Type & Prompt**")
+                
+                # Add filters for under-selected detailed breakdown
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    under_sel_campaigns_list = ['All'] + sorted(under_selected['Campaign Name'].unique().tolist())
+                    selected_under_sel_detail_campaign = st.selectbox("Filter by Campaign", under_sel_campaigns_list, key="under_sel_detail_campaign")
+                
+                with col2:
+                    if selected_under_sel_detail_campaign != 'All':
+                        under_sel_adgroups_list = ['All'] + sorted(under_selected[under_selected['Campaign Name'] == selected_under_sel_detail_campaign]['Ad Group'].unique().tolist())
+                    else:
+                        under_sel_adgroups_list = ['All'] + sorted(under_selected['Ad Group'].unique().tolist())
+                    selected_under_sel_detail_adgroup = st.selectbox("Filter by Ad Group", under_sel_adgroups_list, key="under_sel_detail_adgroup")
+                
+                with col3:
+                    under_sel_max_sections = st.selectbox("Max sections to show", [5, 10, 20, 50], index=1, key="under_sel_max_sections")
+                
+                # Apply filters for under-selected
+                filtered_under_sel = under_selected.copy()
+                if selected_under_sel_detail_campaign != 'All':
+                    filtered_under_sel = filtered_under_sel[filtered_under_sel['Campaign Name'] == selected_under_sel_detail_campaign]
+                if selected_under_sel_detail_adgroup != 'All':
+                    filtered_under_sel = filtered_under_sel[filtered_under_sel['Ad Group'] == selected_under_sel_detail_adgroup]
+                
+                # Limit the number of sections to prevent UI overload
+                under_sel_grouped_data = list(filtered_under_sel.groupby(['Campaign Name', 'Ad Group']))
+                under_sel_limited_groups = under_sel_grouped_data[:under_sel_max_sections]
+                
+                if len(under_sel_grouped_data) > under_sel_max_sections:
+                    st.warning(f"⚠️ Showing {under_sel_max_sections} of {len(under_sel_grouped_data)} campaign-adgroup combinations. Use filters to see specific ones.")
+                
+                # Group by Campaign + Ad Group for second level
+                for (campaign, adgroup), group_data in under_sel_limited_groups:
+                    with st.expander(f"📁 {campaign} → {adgroup} ({len(group_data)} records)"):
+                        # Asset type summary
+                        asset_summary = group_data.groupby('Asset Type').agg({
+                            'Total Generated': 'sum',
+                            'Results Assets': 'sum',
+                            'Errors Count': 'sum',
+                            'Target_Assets': 'sum',
+                            'Selection_Gap': 'sum'
+                        }).reset_index()
+                        asset_summary['Records Count'] = group_data.groupby('Asset Type').size().values
+                        
+                        st.markdown("**Asset Type Summary:**")
+                        
+                        # Style asset summary with red highlighting for negative gaps and remove negative signs
+                        def style_negative_values_under_sel(val):
+                            if isinstance(val, (int, float)) and val < 0:
+                                return 'color: red'
+                            return ''
+                        
+                        def format_negative_values_under_sel(val):
+                            if isinstance(val, (int, float)) and val < 0:
+                                return str(abs(int(val)))
+                            return str(int(val)) if isinstance(val, (int, float)) else val
+                        
+                        asset_summary_display_sel = asset_summary.copy()
+                        asset_summary_display_sel['Selection_Gap'] = asset_summary_display_sel['Selection_Gap'].apply(format_negative_values_under_sel)
+                        
+                        asset_summary_styled_sel = asset_summary_display_sel.style.applymap(
+                            style_negative_values_under_sel, subset=['Selection_Gap']
+                        )
+                        
+                        st.dataframe(asset_summary_styled_sel, width='stretch')
+                        
+                        # Individual prompt details
+                        st.markdown("**Individual Prompt Details:**")
+                        prompt_display = group_data.copy()
+                        prompt_display['Prompt'] = prompt_display['Prompt Number'].apply(lambda x: f'Prompt #{x}')
+                        prompt_display['Selection Gap Display'] = prompt_display['Selection_Gap'].apply(format_selection_gap)
+                        
+                        # Style individual prompt details with red highlighting
+                        def style_prompt_gaps_sel(val):
+                            if isinstance(val, str) and val != '0':
+                                return 'color: red'
+                            return ''
+                        
+                        # Sort by Asset Type (Headlines first), then Prompt Number
+                        prompt_display['Asset_Type_Order'] = prompt_display['Asset Type'].apply(lambda x: 0 if 'Headline' in str(x) else 1)
+                        prompt_sorted = prompt_display.sort_values(['Asset_Type_Order', 'Prompt Number'])
+                        
+                        # Style the prompt details dataframe
+                        prompt_styled_sel = prompt_sorted[['Prompt', 'Asset Type', 'Total Generated', 'Results Assets', 
+                                                          'Target_Assets', 'Errors Count', 'Success Rate %', 'Selection Gap Display']].style.applymap(
+                            style_prompt_gaps_sel, subset=['Selection Gap Display']
+                        )
+                        
+                        st.dataframe(prompt_styled_sel, width='stretch')
         else:
             st.success("✅ All records have sufficient assets for selection!")
     
