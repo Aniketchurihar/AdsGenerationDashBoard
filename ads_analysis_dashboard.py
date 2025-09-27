@@ -1461,87 +1461,114 @@ def display_adgroup_analysis(analysis_results):
                 height=400
             )
         
-        # Detailed ad group table
+        # Detailed ad group table with pagination and filters
         st.subheader("📋 Ad Group Details")
-        st.dataframe(
-            filtered_adgroups.style.format({
-                'Total Assets': '{:,}',
-                'Results Count': '{:,}',
-                'Errors Count': '{:,}',
-                'Success Rate %': '{:.1f}%'
-            }),
-            width='stretch'
-        )
         
-        # Ad Groups with Low Asset Generation (Only Default Assets)
-        st.markdown("### ⚠️ Ad Groups Needing Attention")
+        # Additional filters for the detailed table
+        col1, col2, col3, col4, col5 = st.columns(5)
         
-        # Find ad groups with only default assets or high default asset ratio
-        # Use detailed_adgroup_analysis if available (has Ad Group column), otherwise fall back to detailed_analysis
-        if 'detailed_adgroup_analysis' in analysis_results:
-            detailed_df_for_analysis = analysis_results['detailed_adgroup_analysis']
-        elif 'detailed_analysis_enhanced' in analysis_results:
-            detailed_df_for_analysis = analysis_results['detailed_analysis_enhanced']
+        with col1:
+            # Campaign filter for detailed table
+            available_campaigns = sorted(filtered_adgroups['Campaign Name'].unique())
+            selected_detail_campaigns = st.multiselect(
+                "Filter Campaigns:",
+                options=available_campaigns,
+                default=[],
+                key="adgroup_detail_campaign_filter",
+                help="Leave empty to show all campaigns"
+            )
+        
+        with col2:
+            # Ad Group filter for detailed table
+            available_adgroups = sorted(filtered_adgroups['Ad Group'].unique())
+            selected_detail_adgroups = st.multiselect(
+                "Filter Ad Groups:",
+                options=available_adgroups,
+                default=[],
+                key="adgroup_detail_adgroup_filter",
+                help="Leave empty to show all ad groups"
+            )
+        
+        with col3:
+            # Success rate range filter
+            min_success_detail = st.slider(
+                "Min Success Rate (%):",
+                0, 100, 0,
+                key="adgroup_detail_success_filter"
+            )
+        
+        with col4:
+            # Total assets range filter
+            max_assets = int(filtered_adgroups['Total Assets'].max()) if len(filtered_adgroups) > 0 else 1000
+            min_assets_detail = st.slider(
+                "Min Total Assets:",
+                0, max_assets, 0,
+                key="adgroup_detail_assets_filter"
+            )
+        
+        with col5:
+            # Page size selector
+            page_size = st.selectbox(
+                "Rows per page:",
+                options=[10, 25, 50, 100],
+                index=2,
+                key="adgroup_detail_page_size"
+            )
+        
+        # Apply additional filters to the detailed table
+        detail_filtered_adgroups = filtered_adgroups.copy()
+        
+        if selected_detail_campaigns:
+            detail_filtered_adgroups = detail_filtered_adgroups[
+                detail_filtered_adgroups['Campaign Name'].isin(selected_detail_campaigns)
+            ]
+        
+        if selected_detail_adgroups:
+            detail_filtered_adgroups = detail_filtered_adgroups[
+                detail_filtered_adgroups['Ad Group'].isin(selected_detail_adgroups)
+            ]
+        
+        detail_filtered_adgroups = detail_filtered_adgroups[
+            (detail_filtered_adgroups['Success Rate %'] >= min_success_detail) &
+            (detail_filtered_adgroups['Total Assets'] >= min_assets_detail)
+        ]
+        
+        # Pagination logic
+        total_rows = len(detail_filtered_adgroups)
+        total_pages = (total_rows - 1) // page_size + 1 if total_rows > 0 else 1
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            current_page = st.number_input(
+                f"Page (1-{total_pages}):",
+                min_value=1,
+                max_value=total_pages,
+                value=1,
+                key="adgroup_detail_current_page"
+            )
+        with col2:
+            st.info(f"Showing {total_rows:,} ad groups across {total_pages} pages")
+        
+        # Calculate start and end indices for current page
+        start_idx = (current_page - 1) * page_size
+        end_idx = min(start_idx + page_size, total_rows)
+        
+        # Display paginated data
+        if total_rows > 0:
+            paginated_adgroups = detail_filtered_adgroups.iloc[start_idx:end_idx]
+            
+            st.dataframe(
+                paginated_adgroups.style.format({
+                    'Total Assets': '{:,}',
+                    'Results Count': '{:,}',
+                    'Errors Count': '{:,}',
+                    'Success Rate %': '{:.1f}%'
+                }),
+                width='stretch',
+                height=400
+            )
         else:
-            detailed_df_for_analysis = analysis_results['detailed_analysis']
-        
-        # Filter for default assets
-        default_assets = detailed_df_for_analysis[detailed_df_for_analysis['Source'].str.contains('default_asset', na=False)]
-        
-        if len(default_assets) > 0 and 'Ad Group' in detailed_df_for_analysis.columns:
-            # Group by ad group and campaign to find those with high default asset counts
-            default_summary = default_assets.groupby(['Ad Group', 'Campaign Name']).agg({
-                'Total Assets': 'sum'
-            }).reset_index()
-            
-            # Find ad groups with more than 5 default assets
-            high_default = default_summary[default_summary['Total Assets'] >= 5].sort_values('Total Assets', ascending=False)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("#### 🚨 **Ad Groups with High Default Assets (≥5)**")
-                if len(high_default) > 0:
-                    st.warning(f"Found {len(high_default)} ad groups with 5+ default assets - these need immediate attention!")
-                    st.dataframe(
-                        high_default.style.format({
-                            'Total Assets': '{:,}'
-                        }),
-                        width='stretch',
-                        height=400
-                    )
-                else:
-                    st.success("✅ No ad groups found with 5+ default assets")
-            
-            with col2:
-                # Find ad groups with ONLY default assets (100% default)
-                if 'Ad Group' in detailed_df_for_analysis.columns:
-                    all_adgroups_assets = detailed_df_for_analysis.groupby(['Ad Group', 'Campaign Name']).agg({
-                        'Total Assets': 'sum'
-                    }).reset_index()
-                    
-                    # Merge to find ratio
-                    merged = all_adgroups_assets.merge(default_summary, on=['Ad Group', 'Campaign Name'], how='left', suffixes=('_total', '_default'))
-                    merged['Default_Ratio'] = (merged['Total Assets_default'].fillna(0) / merged['Total Assets_total'] * 100).round(1)
-                    
-                    only_default = merged[merged['Default_Ratio'] == 100.0].sort_values('Total Assets_default', ascending=False)
-                    
-                    st.markdown("#### 🔴 **Ad Groups with ONLY Default Assets**")
-                    if len(only_default) > 0:
-                        st.error(f"Found {len(only_default)} ad groups with 100% default assets - no valid assets generated!")
-                        st.dataframe(
-                            only_default[['Ad Group', 'Campaign Name', 'Total Assets_default']].rename(columns={'Total Assets_default': 'Default Assets'}).style.format({
-                                'Default Assets': '{:,}'
-                            }),
-                            width='stretch',
-                            height=400
-                        )
-                    else:
-                        st.success("✅ No ad groups found with 100% default assets")
-                else:
-                    st.info("ℹ️ Ad Group information not available in detailed analysis")
-        else:
-            st.info("ℹ️ No default assets found in the current dataset")
+            st.info("No ad groups match the selected filters.")
     else:
         st.warning("No ad groups match the current filters. Try adjusting the filter criteria.")
 
