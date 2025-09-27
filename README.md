@@ -14,10 +14,11 @@ A comprehensive Streamlit-based dashboard for analyzing advertising campaign per
 
 ### Data Format
 
-Your Excel file must contain two tabs:
+Your Excel file must contain these tabs:
 
 - **Results Tab**: Successful asset generation data
 - **Errors Tab**: Failed asset generation data with error reasons
+- **Prompts Tab** (Optional): Configuration variables for prompts analysis
 
 ### Required Columns
 
@@ -28,6 +29,22 @@ Both tabs must include:
 Errors tab additionally requires:
 
 - `ReasonForError`
+
+Prompts tab should include:
+
+**Per-Prompt Configuration (Each row = different prompt)**
+- `MaximumNumberOfAdsToGeneratePerPrompt`: Headlines to generate for this prompt
+- `MaximumNumberOfDescriptionsToGeneratePerPrompt`: Descriptions to generate for this prompt
+- `NumberOfHeadlinesPerPrompt`: Headlines to select for this prompt (target)
+- `NumberOfDescriptionsPerPrompt`: Descriptions to select for this prompt (target)
+
+**Example:**
+```
+Row 1 (Prompt #1): 15, 6, 6, 1
+Row 2 (Prompt #2): 15, 6, 4, 1  
+Row 3 (Prompt #3): 15, 6, 1, 1
+Row 4 (Prompt #4): 15, 6, 4, 1
+```
 
 ## 🛠️ Installation
 
@@ -78,6 +95,15 @@ python launch_dashboard.py
 - Ad group performance with filtering
 - Default asset analysis
 - Ad groups needing attention
+
+### 🧪 Prompts Analysis
+
+- **Per-prompt configuration support**: Each row in Prompts tab = different prompt configuration
+- **Shortfall/excess tracking**: Visual +/- indicators for over/under generation with color coding
+- **Advanced filtering**: Filter by generation/selection performance (over/under generated/selected)
+- **Organized data view**: Grouped by Campaign → Ad Group → Prompt for easy comparison
+- **Default assets analysis**: Identify ad groups using default assets that need attention
+- **Performance insights**: Automatic identification of under-performing combinations
 
 ### 🔍 Ads Generation Error Vs Ads Review
 
