@@ -2827,51 +2827,212 @@ def display_prompts_analysis(analysis_results):
             # Default assets table
             st.markdown("#### 📋 Ad Groups Using Default Assets")
             
-            # Add asset type filter for default assets
-            col1, col2 = st.columns(2)
+            # Enhanced filters for default assets
+            col1, col2, col3, col4, col5 = st.columns(5)
+            
             with col1:
-                default_asset_types = filtered_default_assets['Asset Type'].unique()
-                selected_default_asset_types = st.multiselect(
-                    "Filter Default Asset Types:",
-                    options=default_asset_types,
-                    default=default_asset_types,
-                    key="default_assets_filter"
+                # Campaign filter
+                available_default_campaigns = sorted(filtered_default_assets['Campaign Name'].unique())
+                selected_default_campaigns = st.multiselect(
+                    "Filter Campaigns:",
+                    options=available_default_campaigns,
+                    default=[],
+                    key="default_assets_campaign_filter",
+                    help="Leave empty to show all campaigns"
                 )
             
             with col2:
-                default_sort_by = st.selectbox(
-                    "Sort by",
-                    options=['Campaign Name', 'Total Default Assets'],
-                    key="default_assets_sort"
+                # Ad Group filter
+                available_default_adgroups = sorted(filtered_default_assets['Ad Group'].unique())
+                selected_default_adgroups = st.multiselect(
+                    "Filter Ad Groups:",
+                    options=available_default_adgroups,
+                    default=[],
+                    key="default_assets_adgroup_filter",
+                    help="Leave empty to show all ad groups"
                 )
             
-            # Apply asset type filter
+            with col3:
+                # Asset type filter
+                default_asset_types = sorted(filtered_default_assets['Asset Type'].unique())
+                selected_default_asset_types = st.multiselect(
+                    "Filter Asset Types:",
+                    options=default_asset_types,
+                    default=default_asset_types,
+                    key="default_assets_type_filter"
+                )
+            
+            with col4:
+                # Minimum default assets filter
+                max_default_assets = int(filtered_default_assets['Total Default Assets'].max()) if len(filtered_default_assets) > 0 else 100
+                min_default_assets = st.slider(
+                    "Min Default Assets:",
+                    0, max_default_assets, 0,
+                    key="default_assets_min_filter"
+                )
+            
+            with col5:
+                # Page size for default assets
+                default_page_size = st.selectbox(
+                    "Rows per page:",
+                    options=[10, 25, 50, 100],
+                    index=1,
+                    key="default_assets_page_size"
+                )
+            
+            # Apply all filters
+            detail_filtered_default_assets = filtered_default_assets.copy()
+            
+            if selected_default_campaigns:
+                detail_filtered_default_assets = detail_filtered_default_assets[
+                    detail_filtered_default_assets['Campaign Name'].isin(selected_default_campaigns)
+                ]
+            
+            if selected_default_adgroups:
+                detail_filtered_default_assets = detail_filtered_default_assets[
+                    detail_filtered_default_assets['Ad Group'].isin(selected_default_adgroups)
+                ]
+            
             if selected_default_asset_types:
-                filtered_default_assets = filtered_default_assets[filtered_default_assets['Asset Type'].isin(selected_default_asset_types)]
+                detail_filtered_default_assets = detail_filtered_default_assets[
+                    detail_filtered_default_assets['Asset Type'].isin(selected_default_asset_types)
+                ]
             
-            # Sort data
-            sorted_default_data = filtered_default_assets.sort_values(default_sort_by, ascending=False)
+            detail_filtered_default_assets = detail_filtered_default_assets[
+                detail_filtered_default_assets['Total Default Assets'] >= min_default_assets
+            ]
             
-            st.dataframe(
-                sorted_default_data[['Campaign Name', 'Ad Group', 'Asset Type', 
-                                   'Total Default Assets']],
-                width='stretch',
-                height=300
-            )
+            # Pagination for default assets
+            total_default_rows = len(detail_filtered_default_assets)
+            total_default_pages = (total_default_rows - 1) // default_page_size + 1 if total_default_rows > 0 else 1
+            
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                current_default_page = st.number_input(
+                    f"Page (1-{total_default_pages}):",
+                    min_value=1,
+                    max_value=total_default_pages,
+                    value=1,
+                    key="default_assets_current_page"
+                )
+            with col2:
+                st.info(f"Showing {total_default_rows:,} ad groups with default assets across {total_default_pages} pages")
+            
+            # Display paginated default assets data
+            if total_default_rows > 0:
+                start_default_idx = (current_default_page - 1) * default_page_size
+                end_default_idx = min(start_default_idx + default_page_size, total_default_rows)
+                paginated_default_assets = detail_filtered_default_assets.iloc[start_default_idx:end_default_idx]
+                
+                st.dataframe(
+                    paginated_default_assets[['Campaign Name', 'Ad Group', 'Asset Type', 
+                                           'Total Default Assets']],
+                    width='stretch',
+                    height=400
+                )
+            else:
+                st.info("No ad groups match the selected filters.")
             
             # Insights for default assets
             st.markdown("#### 💡 Default Assets Insights")
             
-            high_default_usage = filtered_default_assets[filtered_default_assets['Total Default Assets'] >= 5]
+            high_default_usage = detail_filtered_default_assets[detail_filtered_default_assets['Total Default Assets'] >= 5]
             
             # Insights - Full width
             if len(high_default_usage) > 0:
                 st.warning(f"⚠️ {len(high_default_usage)} ad groups have high default asset usage (≥5 assets)")
                 with st.expander("View High Default Usage"):
-                    st.dataframe(
-                        high_default_usage[['Campaign Name', 'Ad Group', 'Asset Type', 'Total Default Assets']],
-                        width='stretch'
-                    )
+                    # Filters for high default usage
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        # Campaign filter for high usage
+                        available_high_campaigns = sorted(high_default_usage['Campaign Name'].unique())
+                        selected_high_campaigns = st.multiselect(
+                            "Filter Campaigns:",
+                            options=available_high_campaigns,
+                            default=[],
+                            key="high_default_campaign_filter",
+                            help="Leave empty to show all campaigns"
+                        )
+                    
+                    with col2:
+                        # Ad Group filter for high usage
+                        available_high_adgroups = sorted(high_default_usage['Ad Group'].unique())
+                        selected_high_adgroups = st.multiselect(
+                            "Filter Ad Groups:",
+                            options=available_high_adgroups,
+                            default=[],
+                            key="high_default_adgroup_filter",
+                            help="Leave empty to show all ad groups"
+                        )
+                    
+                    with col3:
+                        # Asset type filter for high usage
+                        high_asset_types = sorted(high_default_usage['Asset Type'].unique())
+                        selected_high_asset_types = st.multiselect(
+                            "Filter Asset Types:",
+                            options=high_asset_types,
+                            default=high_asset_types,
+                            key="high_default_type_filter"
+                        )
+                    
+                    with col4:
+                        # Page size for high usage
+                        high_page_size = st.selectbox(
+                            "Rows per page:",
+                            options=[10, 25, 50, 100],
+                            index=1,
+                            key="high_default_page_size"
+                        )
+                    
+                    # Apply filters to high default usage
+                    filtered_high_usage = high_default_usage.copy()
+                    
+                    if selected_high_campaigns:
+                        filtered_high_usage = filtered_high_usage[
+                            filtered_high_usage['Campaign Name'].isin(selected_high_campaigns)
+                        ]
+                    
+                    if selected_high_adgroups:
+                        filtered_high_usage = filtered_high_usage[
+                            filtered_high_usage['Ad Group'].isin(selected_high_adgroups)
+                        ]
+                    
+                    if selected_high_asset_types:
+                        filtered_high_usage = filtered_high_usage[
+                            filtered_high_usage['Asset Type'].isin(selected_high_asset_types)
+                        ]
+                    
+                    # Pagination for high usage
+                    total_high_rows = len(filtered_high_usage)
+                    total_high_pages = (total_high_rows - 1) // high_page_size + 1 if total_high_rows > 0 else 1
+                    
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        current_high_page = st.number_input(
+                            f"Page (1-{total_high_pages}):",
+                            min_value=1,
+                            max_value=total_high_pages,
+                            value=1,
+                            key="high_default_current_page"
+                        )
+                    with col2:
+                        st.info(f"Showing {total_high_rows:,} high usage ad groups across {total_high_pages} pages")
+                    
+                    # Display paginated high usage data
+                    if total_high_rows > 0:
+                        start_high_idx = (current_high_page - 1) * high_page_size
+                        end_high_idx = min(start_high_idx + high_page_size, total_high_rows)
+                        paginated_high_usage = filtered_high_usage.iloc[start_high_idx:end_high_idx]
+                        
+                        st.dataframe(
+                            paginated_high_usage[['Campaign Name', 'Ad Group', 'Asset Type', 'Total Default Assets']],
+                            width='stretch',
+                            height=400
+                        )
+                    else:
+                        st.info("No high usage ad groups match the selected filters.")
             else:
                 st.success("✅ No ad groups with excessive default asset usage")
         else:
